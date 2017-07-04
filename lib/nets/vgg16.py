@@ -16,9 +16,28 @@ import numpy as np
 from nets.network import Network
 from model.config import cfg
 
+
 class vgg16(Network):
   def __init__(self, batch_size=1):
     Network.__init__(self, batch_size=batch_size)
+
+#-----------keras function definition---------------------------
+  def slice_1(self,t):
+    return t[:, 0, :, :]
+
+
+  def slice_2(self,t):
+    return t[:, 1:, :, :]
+
+
+  def slice_3(self,t):
+    return t[:, 0, :]
+
+
+  def slice_4(self,t):
+    return t[:, 1:, :]
+
+#----------------------------------------------------------
 
   def build_network(self, sess, is_training=True):
     with tf.variable_scope('vgg_16', 'vgg_16'):
@@ -81,20 +100,89 @@ class vgg16(Network):
         pool5 = self._crop_pool_layer(net, rois, "pool5")
       else:
         raise NotImplementedError
+      #-------------------------------------pool5 here use RN network-------------------------:
+      column = slim.conv2d(pool5, 256, [7, 1], padding="VALID",trainable=is_training, weights_initializer=initializer, scope="column")
+      row = slim.conv2d(pool5, 256, [1, 7], padding="VALID",trainable=is_training, weights_initializer=initializer, scope="row")
+     
+      column_shapes = column.shape
+      row_shapes = row.shape
 
-      pool5_flat = slim.flatten(pool5, scope='flatten')
+      cw, ch = column_shapes[1], column_shapes[2]
+      rw,rh  = row_shapes[1],row_shapes[2]
+      print("c_shape:",cw,ch,"r_shape",rw,rh)
+      print("begin get features...")
+      features = []
+      for k1 in range(cw):
+        features1 = self.slice_1(column)
+        column = self.slice_2(column) # like cut layer one by one
+        for k2 in range(ch):
+          features2 = self.slice_3(features1)
+          features1 = self.slice_4(features1)
+          features.append(features2)
+
+      for k1 in range(rw):
+        features1 = self.slice_1(row)
+        row = self.slice_2(row) # like cut layer one by one
+        for k2 in range(rh):
+          features2 = self.slice_3(features1)
+          features1 = self.slice_4(features1)
+          features.append(features2)
+
+      print("beging get relationships")
+      relations = []
+      for feature1 in features:
+        for feature2 in features:
+          feature_all = tf.concat([feature1,feature2],1)
+          print(feature_all.shape)
+          relations.append(feature_all)
+      relations_map=tf.stack(relations,2)
+      print(relations_map.shape)
+      relations_map = tf.expand_dims(relations_map,3)
+      print(relations_map.shape)
+      print("beging get  mid relationships")
+      mid_relations=slim.conv2d(relations_map, 512, [512,1], padding="VALID",trainable=is_training, weights_initializer=initializer, scope="mid_relations1")
+      print("mid_relations:",mid_relations.shape)
+      mid_relations=slim.conv2d(mid_relations, 512, [1,1], padding="VALID",trainable=is_training, weights_initializer=initializer, scope="mid_relations2")
+      print("mid_relations2:",mid_relations.shape)
+      mid_relations=slim.conv2d(mid_relations, 512, [1,1], padding="VALID",trainable=is_training, weights_initializer=initializer, scope="mid_relations3")
+      print("mid_relations3:",mid_relations.shape)
+      rn_map = slim.avg_pool2d(mid_relations,[1,196]) 
+      print("rn:",rn_map.shape)
+
+      rn_flatten =slim.flatten(rn_map,scope="flatten")
+            
+      print("rn:",rn_flatten.shape)
+      rn = slim.fully_connected(rn_flatten,256,activation_fn=None, scope='MLP_l1')
+      rn = slim.batch_norm(rn)
+      rn = tf.nn.relu(rn)
+      if is_training:
+         rn = slim.dropout(rn, keep_prob=0.5, is_training=True, scope='drop1')
+  
+      rn = slim.fully_connected(rn, 256,weights_initializer=initializer,trainable=is_training,activation_fn=None, scope='MLP_l2')
+      rn = slim.batch_norm(rn)
+      rn = tf.nn.relu(rn)
+      if is_training:
+         rn = slim.dropout(rn, keep_prob=0.5, is_training=True, scope='drop2')
+      print("RN OK")
+      
+
+      ''' pool5_flat = slim.flatten(pool5, scope='flatten')
       fc6 = slim.fully_connected(pool5_flat, 4096, scope='fc6')
       if is_training:
         fc6 = slim.dropout(fc6, keep_prob=0.5, is_training=True, scope='dropout6')
       fc7 = slim.fully_connected(fc6, 4096, scope='fc7')
       if is_training:
         fc7 = slim.dropout(fc7, keep_prob=0.5, is_training=True, scope='dropout7')
-      cls_score = slim.fully_connected(fc7, self._num_classes, 
+      '''
+
+
+      #------------------------------using RN to get f7-----------------------------
+      cls_score = slim.fully_connected(rn, self._num_classes, 
                                        weights_initializer=initializer,
                                        trainable=is_training,
                                        activation_fn=None, scope='cls_score')
       cls_prob = self._softmax_layer(cls_score, "cls_prob")
-      bbox_pred = slim.fully_connected(fc7, self._num_classes * 4, 
+      bbox_pred = slim.fully_connected(rn, self._num_classes * 4, 
                                        weights_initializer=initializer_bbox,
                                        trainable=is_training,
                                        activation_fn=None, scope='bbox_pred')
@@ -136,17 +224,19 @@ class vgg16(Network):
       with tf.device("/cpu:0"):
         # fix the vgg16 issue from conv weights to fc weights
         # fix RGB to BGR
-        fc6_conv = tf.get_variable("fc6_conv", [7, 7, 512, 4096], trainable=False)
-        fc7_conv = tf.get_variable("fc7_conv", [1, 1, 4096, 4096], trainable=False)
+        #fc6_conv = tf.get_variable("fc6_conv", [7, 7, 512, 4096], trainable=False)
+        #fc7_conv = tf.get_variable("fc7_conv", [1, 1, 4096, 4096], trainable=False)
         conv1_rgb = tf.get_variable("conv1_rgb", [3, 3, 3, 64], trainable=False)
-        restorer_fc = tf.train.Saver({"vgg_16/fc6/weights": fc6_conv, 
-                                      "vgg_16/fc7/weights": fc7_conv,
-                                      "vgg_16/conv1/conv1_1/weights": conv1_rgb})
+        restorer_fc = tf.train.Saver({"vgg_16/conv1/conv1_1/weights": conv1_rgb})
+        
+        #restorer_fc = tf.train.Saver({"vgg_16/fc6/weights": fc6_conv, 
+                                     # "vgg_16/fc7/weights": fc7_conv,
+                                     # "vgg_16/conv1/conv1_1/weights": conv1_rgb})
         restorer_fc.restore(sess, pretrained_model)
 
-        sess.run(tf.assign(self._variables_to_fix['vgg_16/fc6/weights:0'], tf.reshape(fc6_conv, 
-                            self._variables_to_fix['vgg_16/fc6/weights:0'].get_shape())))
-        sess.run(tf.assign(self._variables_to_fix['vgg_16/fc7/weights:0'], tf.reshape(fc7_conv, 
-                            self._variables_to_fix['vgg_16/fc7/weights:0'].get_shape())))
+        #sess.run(tf.assign(self._variables_to_fix['vgg_16/fc6/weights:0'], tf.reshape(fc6_conv, 
+                            #self._variables_to_fix['vgg_16/fc6/weights:0'].get_shape())))
+        #sess.run(tf.assign(self._variables_to_fix['vgg_16/fc7/weights:0'], tf.reshape(fc7_conv, 
+                            #self._variables_to_fix['vgg_16/fc7/weights:0'].get_shape())))
         sess.run(tf.assign(self._variables_to_fix['vgg_16/conv1/conv1_1/weights:0'], 
                             tf.reverse(conv1_rgb, [2])))
