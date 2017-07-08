@@ -139,6 +139,37 @@ class Network(object):
 
     return slim.max_pool2d(crops, [2, 2], padding='SAME')
 
+  '''def _crop_pool_layer_weights(self, bottom, rois, weight,name):
+    with tf.variable_scope(name) as scope:
+      batch_ids = tf.squeeze(tf.slice(rois, [0, 0], [-1, 1], name="batch_id"), [1])
+      # Get the normalized coordinates of bboxes
+      bottom_shape = tf.shape(bottom)
+      height = (tf.to_float(bottom_shape[1]) - 1.) * np.float32(self._feat_stride[0])
+      width = (tf.to_float(bottom_shape[2]) - 1.) * np.float32(self._feat_stride[0])
+      x1 = tf.slice(rois, [0, 1], [-1, 1], name="x1") / width 
+      y1 = tf.slice(rois, [0, 2], [-1, 1], name="y1") / height 
+      x2 = tf.slice(rois, [0, 3], [-1, 1], name="x2") / width 
+      y2 = tf.slice(rois, [0, 4], [-1, 1], name="y2") / height 
+      
+      w_weight=(x2-x1)*weight*0.5
+      h_weight=(y2-y1)*weight*0.5
+      x1= x1-w_weight
+      x2= x2+w_weight
+      
+      y1=y1-h_weight
+      y2=y2+h_weight
+     
+      # Won't be backpropagated to rois anyway, but to save time
+      bboxes = tf.stop_gradient(tf.concat([y1, x1, y2, x2], axis=1))
+      pre_pool_size = cfg.POOLING_SIZE * 2
+      crops = tf.image.crop_and_resize(bottom, bboxes, tf.to_int32(batch_ids), [pre_pool_size, pre_pool_size], name="crops")
+
+    return slim.max_pool2d(crops, [2, 2], padding='SAME')'''
+
+
+
+
+
   def _dropout_layer(self, bottom, name, ratio=0.5):
     return tf.nn.dropout(bottom, ratio, name=name)
 

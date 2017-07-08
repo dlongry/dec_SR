@@ -261,7 +261,7 @@ __C.GPU_ID = 0
 __C.POOLING_MODE = 'crop'
 
 # Size of the pooled region after RoI pooling
-__C.POOLING_SIZE = 7
+__C.POOLING_SIZE = 4
 
 # Anchor scales for RPN
 __C.ANCHOR_SCALES = [8,16,32]

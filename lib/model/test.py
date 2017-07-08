@@ -155,7 +155,13 @@ def test_net(sess, net, imdb, weights_filename, max_per_image=100, thresh=0.05):
 
   for i in range(num_images):
     im = cv2.imread(imdb.image_path_at(i))
+    #rotation
+    sp = im.shape
+    rows=sp[0]
+    cols=sp[1]
 
+    M=cv2.getRotationMatrix2D((cols/2,rows/2),10,1)
+    im = cv2.warpAffine(im,M,(cols,rows))
     _t['im_detect'].tic()
     scores, boxes = im_detect(sess, net, im)
     _t['im_detect'].toc()

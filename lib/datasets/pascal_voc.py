@@ -21,7 +21,8 @@ import subprocess
 import uuid
 from .voc_eval import voc_eval
 from model.config import cfg
-
+import cv2 #for get image size
+import math
 
 class pascal_voc(imdb):
   def __init__(self, image_set, year, devkit_path=None):
@@ -139,6 +140,13 @@ class pascal_voc(imdb):
     format.
     """
     filename = os.path.join(self._data_path, 'Annotations', index + '.xml')
+    #get image size
+    image_path = os.path.join(self.data_path,'JPEGImages',index+'.jpg')   
+    im=cv2.imread(image_path)
+    sp=im.shape
+    rows=sp[0]
+    cols=sp[1]
+    #--------------------------------
     tree = ET.parse(filename)
     objs = tree.findall('object')
     if not self.config['use_diff']:
@@ -165,6 +173,32 @@ class pascal_voc(imdb):
       y1 = float(bbox.find('ymin').text) 
       x2 = float(bbox.find('xmax').text) 
       y2 = float(bbox.find('ymax').text) 
+      #--------------modify-------------------------
+      degree = 10
+      cx=cols/2
+      cy=rows/2
+      p_up_left =  np.array([[x1,y1,1]])
+      p_up_right = np.array([[x2,y1,1]])
+      p_down_left = np.array([[x1,y2,1]])
+      p_down_right = np.array([[x2,y2,1]])
+ 
+      a=math.cos(math.radians(degree))
+      b=math.sin(math.radians(degree))
+      rotation_matrix = np.array([[a,-b,(1-a)*cx-b*cy],[-b,a,b*cx+(1-a)*cy]])
+      _p_up_left = np.dot(rotation_matrix,p_up_left.T)
+      _p_up_right= np.dot(rotation_matrix,p_up_right.T)
+      _p_down_left= np.dot(rotation_matrix,p_down_left.T)
+      _p_down_right= np.dot(rotation_matrix,p_down_right.T)
+
+      x=np.asarray([_p_up_left[0],_p_up_right[0],_p_down_left[0],_p_down_right[0]])
+      y=np.asarray([_p_up_left[1],_p_up_right[1],_p_down_left[1],_p_down_right[1]])
+
+      x1 = np.min(x)
+      y1 = np.min(y)
+
+      x2 = np.max(x)
+      y2 = np.max(y)
+      #------------------------------------------------
       cls = self._class_to_ind[obj.find('name').text.lower().strip()]
       boxes[ix, :] = [x1, y1, x2, y2]
       gt_classes[ix] = cls

@@ -22,93 +22,23 @@ class vgg16(Network):
     Network.__init__(self, batch_size=batch_size)
 
 #-----------keras function definition---------------------------
-
   def slice_1(self,t):
     return t[:, 0, :, :]
+
 
   def slice_2(self,t):
     return t[:, 1:, :, :]
 
+
   def slice_3(self,t):
     return t[:, 0, :]
 
+
   def slice_4(self,t):
     return t[:, 1:, :]
-  
-  def slice_3x3(self,t,x,y):
-    return t[:,x:x+3,y:y+3,:]
-
-  def single_relation_conv(self,input_map,MLP_units,channel,is_training,reuse_x=None): #fall feature map: slow version
-    w,h,c=input_map.shape[1],input_map.shape[2],input_map.shape[3]
-    print("input_shape:",w,h,c)
-    print("begin get features...")
-    all_num = w*h*w*h
-    ck=2*int(c)
-    features = []
-    for k1 in range(w):
-      features1 = self.slice_1(input_map)
-      pool5 = self.slice_2(input_map) # like cut layer one by one
-      for k2 in range(h):
-        features2 = self.slice_3(features1)
-        features1 = self.slice_4(features1)
-        features.append(features2)
-    print("beging get relationships")
-    relations = []
-    for feature1 in features:
-      for feature2 in features:
-        feature_all = tf.concat([feature1,feature2],1)
-            #print(feature_all.shape)
-        relations.append(feature_all)
-    relations_map=tf.stack(relations,2)
-    print(relations_map.shape)
-    relations_map = tf.expand_dims(relations_map,3)
-    print(relations_map.shape)
-    print("beging get  mid relationships")
-    mid_relations=slim.conv2d(relations_map, MLP_units, [ck,1], padding="VALID",trainable=is_training, scope="mid_relations1",reuse=reuse_x)
-    print("mid_relations:",mid_relations.shape)
-    mid_relations=slim.conv2d(mid_relations, MLP_units, [1,1], padding="VALID",trainable=is_training, scope="mid_relations2",reuse=reuse_x)
-    print("mid_relations2:",mid_relations.shape)
-    mid_relations=slim.conv2d(mid_relations, channel, [1,1], padding="VALID",trainable=is_training, scope="mid_relations3",reuse=reuse_x)
-    print("mid_relations3:",mid_relations.shape)
-    rn_map = slim.avg_pool2d(mid_relations,[1,all_num])
-    print("rn:",rn_map.shape)
-    return rn_map
-
-  def relation_conv(self,input_map,MLP_units,out_channel,kernel_size,is_training=True):
-    w,h=input_map.shape[1],input_map.shape[2]
-    print("relation_conv",w,h,kernel_size)
-    w=w-kernel_size
-    print("src_w:",w)
-    h=h-kernel_size
-    h_now=0
-    w_now=0
-    result_list=[]
-    while h_now <= h:
-      #begin_x=[0,w_now,h_now,0]
-      #size_x=[-1,kernel_size,kernel_size,-1]
-      out=self.slice_3x3(input_map,w_now,h_now)
-      print("out_shape",out.shape)
-      if h_now==0 and w_now ==0:
-        mid_result=self.single_relation_conv(out,MLP_units,out_channel,is_training,reuse_x=None) #cut feature map
-      else:       
-        mid_result=self.single_relation_conv(out,MLP_units,out_channel,is_training,reuse_x=True) #cut feature map
-      result_list.append(mid_result)
-      if w_now==w:
-        w_now=0
-        h_now=h_now+1
-        print("h_now",h_now)
-      else:
-        w_now=w_now+1
-        print("w_now",w_now)
-    w=w+1
-    h=h+1
-    result_map=tf.stack(result_list)
-    print("result_map",result_map.shape)
-    result=tf.reshape(result_map,(-1,int(w),int(h),out_channel)) #w,h or h,w?
-    print("result_shape",result.shape)
-    return result
 
 #----------------------------------------------------------
+
   def build_network(self, sess, is_training=True):
     with tf.variable_scope('vgg_16', 'vgg_16'):
       # select initializers
@@ -171,9 +101,54 @@ class vgg16(Network):
       else:
         raise NotImplementedError
       #-------------------------------------pool5 here use RN network-------------------------:
-      pool5_shapes=pool5.shape
-      #rn_map=self.single_relation_conv(pool5,512,512,is_training)
-      rn_map = self.relation_conv(pool5,256,256,3,is_training)
+      column = slim.conv2d(pool5, 256, [7, 1], padding="VALID",trainable=is_training, weights_initializer=initializer, scope="column")
+      row = slim.conv2d(pool5, 256, [1, 7], padding="VALID",trainable=is_training, weights_initializer=initializer, scope="row")
+     
+      column_shapes = column.shape
+      row_shapes = row.shape
+
+      cw, ch = column_shapes[1], column_shapes[2]
+      rw,rh  = row_shapes[1],row_shapes[2]
+      print("c_shape:",cw,ch,"r_shape",rw,rh)
+      print("begin get features...")
+      features = []
+      for k1 in range(cw):
+        features1 = self.slice_1(column)
+        column = self.slice_2(column) # like cut layer one by one
+        for k2 in range(ch):
+          features2 = self.slice_3(features1)
+          features1 = self.slice_4(features1)
+          features.append(features2)
+
+      for k1 in range(rw):
+        features1 = self.slice_1(row)
+        row = self.slice_2(row) # like cut layer one by one
+        for k2 in range(rh):
+          features2 = self.slice_3(features1)
+          features1 = self.slice_4(features1)
+          features.append(features2)
+
+      print("beging get relationships")
+      relations = []
+      for feature1 in features:
+        for feature2 in features:
+          feature_all = tf.concat([feature1,feature2],1)
+          print(feature_all.shape)
+          relations.append(feature_all)
+      relations_map=tf.stack(relations,2)
+      print(relations_map.shape)
+      relations_map = tf.expand_dims(relations_map,3)
+      print(relations_map.shape)
+      print("beging get  mid relationships")
+      mid_relations=slim.conv2d(relations_map, 512, [512,1], padding="VALID",trainable=is_training, weights_initializer=initializer, scope="mid_relations1")
+      print("mid_relations:",mid_relations.shape)
+      mid_relations=slim.conv2d(mid_relations, 512, [1,1], padding="VALID",trainable=is_training, weights_initializer=initializer, scope="mid_relations2")
+      print("mid_relations2:",mid_relations.shape)
+      mid_relations=slim.conv2d(mid_relations, 512, [1,1], padding="VALID",trainable=is_training, weights_initializer=initializer, scope="mid_relations3")
+      print("mid_relations3:",mid_relations.shape)
+      rn_map = slim.avg_pool2d(mid_relations,[1,196]) 
+      print("rn:",rn_map.shape)
+
       rn_flatten =slim.flatten(rn_map,scope="flatten")
             
       print("rn:",rn_flatten.shape)
